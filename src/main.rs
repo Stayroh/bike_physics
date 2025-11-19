@@ -1,15 +1,21 @@
+#[path = "../helpers/camera_controller.rs"]
+mod camera_controller;
+
 use bevy::{
     core_pipeline::{tonemapping::Tonemapping, prepass::{DepthPrepass, MotionVectorPrepass, DeferredPrepass}}, dev_tools::fps_overlay::FpsOverlayPlugin,
     pbr::DefaultOpaqueRendererMethod, pbr::ScreenSpaceReflections, post_process::bloom::Bloom,
-    anti_alias::fxaa::Fxaa,
+    anti_alias::taa::TemporalAntiAliasing,
     post_process::{effect_stack::ChromaticAberration, dof::DepthOfField},
     prelude::*,
 };
+use camera_controller::{CameraController, CameraControllerPlugin};
+
 
 fn main() {
     App::new()
         .insert_resource(DefaultOpaqueRendererMethod::deferred())
         .add_plugins(DefaultPlugins)
+        .add_plugins(CameraControllerPlugin)
         .add_plugins(FpsOverlayPlugin::default())
         .insert_resource(ClearColor(Color::BLACK))
         .add_systems(Startup, setup)
@@ -24,18 +30,27 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         Bloom::NATURAL,
         ScreenSpaceReflections {
             perceptual_roughness_threshold: 0.5,
+            linear_steps: 64,
+            linear_march_exponent: 1.2,
+            bisection_steps: 16,
+            use_secant: false,
             ..default()
         },
         DepthPrepass,
         MotionVectorPrepass,
         DeferredPrepass,
         Msaa::Off,
-        Fxaa::default(),
+        TemporalAntiAliasing::default(),
         ChromaticAberration::default(),
         DepthOfField {
-            focal_distance: 8.0,
-            aperture_f_stops : 1.0,
+            focal_distance: 0.6,
+            aperture_f_stops: 4.0,
             ..default()
+        },
+        CameraController {
+            walk_speed: 3.0,
+            run_speed: 10.0,
+            ..Default::default()
         },
 
     ));
@@ -52,6 +67,10 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands.spawn((
         SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/TronMap.glb"))),
+        Transform::from_xyz(0.0, -1.0, 0.0),
+    ));
+        commands.spawn((
+        SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/TronBike.glb"))),
         Transform::from_xyz(0.0, -1.0, 0.0),
     ));
 }
