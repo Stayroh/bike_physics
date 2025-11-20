@@ -5,16 +5,18 @@ mod autofocus;
 
 use bevy::{
     core_pipeline::{
+        bloom::Bloom,
+        experimental::taa::TemporalAntiAliasing,
+        post_process::ChromaticAberration,
         prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass},
         tonemapping::Tonemapping,
-        experimental::taa::TemporalAntiAliasing,
-        bloom::Bloom,
-        post_process::ChromaticAberration,
     },
     dev_tools::fps_overlay::FpsOverlayPlugin,
     pbr::DefaultOpaqueRendererMethod,
     pbr::ScreenSpaceReflections,
     prelude::*,
+    render::mesh::VertexAttributeValues,
+    scene::SceneInstanceReady,
 };
 use bevy_egui::EguiPlugin;
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
@@ -84,7 +86,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         illuminance: 0.0,
         ..Default::default()
     });
-    
+
     commands.insert_resource(AmbientLight {
         color: Color::BLACK,
         brightness: 0.0,
@@ -96,8 +98,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
             asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/TronMap_Base.glb")),
         ),
         Transform::from_xyz(0.0, -1.0, 0.0),
-        
-    ));
+    )).observe(add_collider_on_scene_ready);
 
     commands.spawn((
         SceneRoot(
@@ -105,7 +106,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         ),
         Transform::from_xyz(0.0, -1.0, 0.0),
         autofocus::FocusTarget,
-
     ));
 
     commands.spawn((
@@ -127,6 +127,69 @@ fn toggle_freecam(
             } else {
                 commands.entity(entity).insert(CameraController::default());
             }
+        }
+    }
+}
+
+fn add_collider_on_scene_ready(
+    scene_ready: Trigger<SceneInstanceReady>,
+    children: Query<&Children>,
+    mesh_query: Query<&Mesh3d>,
+    meshes: ResMut<Assets<Mesh>>,
+    mut commands: Commands,
+) {
+    println!("Scene instance ready");
+    for descendant in children.iter_descendants(scene_ready.target()) {
+        println!("Checking descendant entity {:?}", descendant);
+        if let Ok(Mesh3d(mesh_handle)) = mesh_query.get(descendant) {
+            if let Some(mesh) = meshes.get(mesh_handle) {
+                if let Some(collider) = mesh_to_trimesh_collider(mesh) {
+                    commands.entity(descendant).insert(collider);
+                    println!("Added collider to mesh entity {:?}", descendant);
+                }
+            }
+        }
+    }
+}
+
+pub fn mesh_to_trimesh_collider(mesh: &Mesh) -> Option<Collider> {
+    // Extract vertices
+    let vertices = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        Some(VertexAttributeValues::Float32x3(positions)) => positions
+            .iter()
+            .map(|[x, y, z]| Vect::new(*x, *y, *z))
+            .collect::<Vec<_>>(),
+        _ => {
+            return {
+                warn!("Mesh does not have valid position attribute for collider generation");
+                None
+            };
+        }
+    };
+
+    // Extract indices
+    let indices = match mesh.indices() {
+        Some(bevy::render::mesh::Indices::U32(idx)) => idx
+            .chunks_exact(3)
+            .map(|chunk| [chunk[0], chunk[1], chunk[2]])
+            .collect::<Vec<_>>(),
+        Some(bevy::render::mesh::Indices::U16(idx)) => idx
+            .chunks_exact(3)
+            .map(|chunk| [chunk[0] as u32, chunk[1] as u32, chunk[2] as u32])
+            .collect::<Vec<_>>(),
+        None => {
+            return {
+                warn!("Mesh does not have indices for collider generation");
+                None
+            };
+        }
+    };
+
+    match Collider::trimesh(vertices, indices) {
+        Ok(collider) => Some(collider),
+        Err(e) => {
+            warn!("Failed to create trimesh collider: {}", e);
+            None
         }
     }
 }
