@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::post_process::dof::DepthOfField;
+use bevy::core_pipeline::dof::DepthOfField;
 
 /// Component that enables smooth auto-focus for depth of field
 #[derive(Component)]

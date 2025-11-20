@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.17.3", features = ["dynamic_linking", "bevy_dev_tools", "bevy_pbr"] }
-bevy-inspector-egui = "0.35.0"
-bevy_egui = "0.38.0"
-bevy_rapier3d = "0.31.0"
+bevy = { version = "0.16", features = ["dynamic_linking", "bevy_dev_tools", "bevy_pbr", "hdr"] }
+bevy-inspector-egui = "0.33.0"
+bevy_egui = "0.36.0"
+bevy_rapier3d = { version = "0.31.0", features = ["simd-stable", "debug-render"] }
 
 
 [profile.dev.package."*"]

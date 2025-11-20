@@ -4,16 +4,16 @@ mod camera_controller;
 mod autofocus;
 
 use bevy::{
-    anti_alias::taa::TemporalAntiAliasing,
     core_pipeline::{
         prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass},
         tonemapping::Tonemapping,
+        experimental::taa::TemporalAntiAliasing,
+        bloom::Bloom,
+        post_process::ChromaticAberration,
     },
     dev_tools::fps_overlay::FpsOverlayPlugin,
     pbr::DefaultOpaqueRendererMethod,
     pbr::ScreenSpaceReflections,
-    post_process::bloom::Bloom,
-    post_process::{dof::DepthOfField, effect_stack::ChromaticAberration},
     prelude::*,
 };
 use bevy_egui::EguiPlugin;
@@ -30,23 +30,29 @@ fn main() {
         .add_plugins(FpsOverlayPlugin::default())
         .add_plugins(EguiPlugin::default())
         .add_plugins(WorldInspectorPlugin::new())
+        .add_plugins(RapierPhysicsPlugin::<NoUserData>::default().in_fixed_schedule())
+        .add_plugins(RapierDebugRenderPlugin::default())
         .insert_resource(ClearColor(Color::BLACK))
         .add_systems(Startup, setup)
         .add_systems(Update, toggle_freecam)
-        .add_systems(
-            Update,
-            add_colliders_to_scene.run_if(resource_exists::<Assets<Mesh>>),
-        )
         .run();
 }
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
         Camera3d::default(),
+        Camera {
+            hdr: true,
+            ..default()
+        },
         Transform::from_translation(Vec3::new(-10.0, 5.0, 25.0) * 0.4)
             .looking_at(Vec3::new(1.2, -2.0, 0.0), Vec3::Y),
         Tonemapping::TonyMcMapface,
-        Bloom::NATURAL,
+        Bloom {
+            intensity: 0.1,
+            composite_mode: bevy::core_pipeline::bloom::BloomCompositeMode::Additive,
+            ..default()
+        },
         ScreenSpaceReflections {
             perceptual_roughness_threshold: 0.5,
             linear_steps: 64,
@@ -90,7 +96,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
             asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/TronMap_Base.glb")),
         ),
         Transform::from_xyz(0.0, -1.0, 0.0),
-        NeedsCollider,
     ));
 
     commands.spawn((
@@ -130,48 +135,3 @@ fn toggle_freecam(
         }
     }
 }
-
-fn add_colliders_to_scene(
-    mut commands: Commands,
-    scene_query: Query<(Entity, &Children), With<NeedsCollider>>,
-    mesh_query: Query<&Handle<>>,
-    collider_query: Query<&Collider>,
-    meshes: Res<Assets<Mesh>>,
-) {
-    for (scene_entity, children) in scene_query.iter() {
-        let mut all_meshes_loaded = true;
-        let mut colliders_added = 0;
-        
-        // Recursively check all children for meshes
-        for &child in children.iter() {
-            if let Ok(mesh_handle) = mesh_query.get(child) {
-                if let Some(mesh) = meshes.get(mesh_handle) {
-                    // Only add collider if it doesn't already have one
-                    if collider_query.get(child).is_err() {
-                        if let Ok(collider) = Collider::from_bevy_mesh(
-                            mesh, 
-                            &ComputedColliderShape::TriMesh
-                        ) {
-                            commands.entity(child).insert((
-                                RigidBody::Fixed,
-                                collider,
-                            ));
-                            colliders_added += 1;
-                        }
-                    }
-                } else {
-                    all_meshes_loaded = false;
-                }
-            }
-        }
-        
-        // Remove marker once all meshes are processed
-        if all_meshes_loaded && colliders_added > 0 {
-            commands.entity(scene_entity).remove::<NeedsCollider>();
-            println!("Added {} colliders to scene", colliders_added);
-        }
-    }
-}
-
-#[derive(Component)]
-struct NeedsCollider;
