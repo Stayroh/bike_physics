@@ -3,6 +3,8 @@ mod camera_controller;
 
 mod autofocus;
 
+use std::sync::Once;
+
 use bevy::{
     core_pipeline::{
         bloom::Bloom,
@@ -33,10 +35,11 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .add_plugins(WorldInspectorPlugin::new())
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default().in_fixed_schedule())
-        .add_plugins(RapierDebugRenderPlugin::default())
+        //.add_plugins(RapierDebugRenderPlugin::default())
         .insert_resource(ClearColor(Color::BLACK))
         .add_systems(Startup, setup)
         .add_systems(Update, toggle_freecam)
+        .add_systems(Update, ball_force_control)
         .run();
 }
 
@@ -51,8 +54,8 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
             .looking_at(Vec3::new(1.2, -2.0, 0.0), Vec3::Y),
         Tonemapping::TonyMcMapface,
         Bloom {
-            intensity: 0.1,
-            composite_mode: bevy::core_pipeline::bloom::BloomCompositeMode::Additive,
+            intensity: 0.2,
+            composite_mode: bevy::core_pipeline::bloom::BloomCompositeMode::EnergyConserving,
             ..default()
         },
         ScreenSpaceReflections {
@@ -68,7 +71,10 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         DeferredPrepass,
         Msaa::Off,
         TemporalAntiAliasing::default(),
-        ChromaticAberration::default(),
+        ChromaticAberration {
+            intensity: 0.02,
+            ..default()
+        },
         /*/
         DepthOfField {
             aperture_f_stops: 5.0,
@@ -94,11 +100,21 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     });
 
     commands.spawn((
-        SceneRoot(
-            asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/TronMap_Base.glb")),
-        ),
-        Transform::from_xyz(0.0, -1.0, 0.0),
-    )).observe(add_collider_on_scene_ready);
+        SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/Ball.glb"))),
+        Transform::from_xyz(0.0, 3.0, 5.0).with_scale(Vec3::splat(0.2)),
+        RigidBody::Dynamic,
+        Collider::ball(1.0),
+        ExternalForce::default(),
+    ));
+
+    commands
+        .spawn((
+            SceneRoot(
+                asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/TronMap_Base.glb")),
+            ),
+            Transform::from_xyz(0.0, -1.0, 0.0),
+        ))
+        .observe(add_collider_on_scene_ready);
 
     commands.spawn((
         SceneRoot(
@@ -192,4 +208,43 @@ pub fn mesh_to_trimesh_collider(mesh: &Mesh) -> Option<Collider> {
             None
         }
     }
+}
+
+fn ball_force_control(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut query: Query<&mut ExternalForce, With<SceneRoot>>,
+    camera_query: Single<&Transform, With<Camera3d>>,
+) {
+    let transform = camera_query;
+    for mut externalforce in query.iter_mut() {
+        let mut force = Vec3::ZERO;
+        if keyboard_input.pressed(KeyCode::KeyW) {
+            force += *transform.forward();
+        }
+        if keyboard_input.pressed(KeyCode::KeyS) {
+            force -= *transform.forward();
+        }
+        if keyboard_input.pressed(KeyCode::KeyA) {
+            force -= *transform.right();
+        }
+        if keyboard_input.pressed(KeyCode::KeyD) {
+            force += *transform.right();
+        }
+        if force != Vec3::ZERO {
+            force = force.normalize() * 0.1;
+            externalforce.force = force;
+        }
+    }
+}
+
+#[derive(Component)]
+struct CameraTarget {
+    damping: f32,
+    target: Entity,
+}
+
+fn camera_target_system(
+    mut query: Query<(&mut Transform, &CameraTarget), With<Camera3d>>
+) {
+    
 }
