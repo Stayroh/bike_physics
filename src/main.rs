@@ -96,18 +96,13 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
             asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/TronMap_Base.glb")),
         ),
         Transform::from_xyz(0.0, -1.0, 0.0),
+        
     ));
 
     commands.spawn((
         SceneRoot(
             asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/TronMap_Neon.glb")),
         ),
-        Transform::from_xyz(0.0, -1.0, 0.0),
-        autofocus::FocusTarget,
-
-    ));
-    commands.spawn((
-        SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/TronMap_Neon.glb"))),
         Transform::from_xyz(0.0, -1.0, 0.0),
         autofocus::FocusTarget,
 
