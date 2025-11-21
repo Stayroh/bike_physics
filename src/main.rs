@@ -160,6 +160,7 @@ fn add_collider_on_scene_ready(
                 let collider = Collider::trimesh_from_mesh(mesh).unwrap();
                 commands.entity(descendant).insert(collider);
                 commands.entity(descendant).insert(RigidBody::Static);
+                commands.entity(descendant).insert(CollisionMargin(0.001));
             }
         }
     }
