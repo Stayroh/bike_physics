@@ -3,7 +3,6 @@ mod camera_controller;
 
 mod autofocus;
 
-use std::sync::Once;
 
 use bevy::{
     core_pipeline::{
@@ -14,8 +13,7 @@ use bevy::{
         tonemapping::Tonemapping,
     },
     dev_tools::fps_overlay::FpsOverlayPlugin,
-    pbr::DefaultOpaqueRendererMethod,
-    pbr::ScreenSpaceReflections,
+    pbr::{DefaultOpaqueRendererMethod, ScreenSpaceReflections},
     prelude::*,
     render::mesh::VertexAttributeValues,
     scene::SceneInstanceReady,
@@ -35,11 +33,11 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .add_plugins(WorldInspectorPlugin::new())
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default().in_fixed_schedule())
-        //.add_plugins(RapierDebugRenderPlugin::default())
+        .add_plugins(RapierDebugRenderPlugin::default())
         .insert_resource(ClearColor(Color::BLACK))
         .add_systems(Startup, setup)
         .add_systems(Update, toggle_freecam)
-        .add_systems(Update, ball_force_control)
+        .add_systems(Update, (ball_force_control, camera_target_system))
         .run();
 }
 
@@ -70,6 +68,10 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         MotionVectorPrepass,
         DeferredPrepass,
         Msaa::Off,
+        FollowTarget {
+            strength: 2.0,
+            vertical_offset: 0.2,
+        },
         TemporalAntiAliasing::default(),
         ChromaticAberration {
             intensity: 0.02,
@@ -101,11 +103,12 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands.spawn((
         SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/Ball.glb"))),
-        Transform::from_xyz(0.0, 3.0, 5.0).with_scale(Vec3::splat(0.2)),
+        Transform::from_xyz(0.0, 1.0, 5.0).with_scale(Vec3::splat(0.05)),
         RigidBody::Dynamic,
         Collider::ball(1.0),
         Velocity::zero(),
         ExternalForce::default(),
+        CameraTarget,
     ));
 
     commands
@@ -217,23 +220,27 @@ fn ball_force_control(
 ) {
     for (mut externalforce, velocity) in query.iter_mut() {
         let look_vector = velocity.linvel.normalize();
+        let speed = velocity.linvel.length() * 1.0;
         let up_vector = Vec3::new(0.0, 1.0, 0.0);
         let right_vector = look_vector.cross(up_vector).normalize();
         let mut force = Vec3::ZERO;
         if keyboard_input.pressed(KeyCode::KeyW) {
             force += look_vector;
+            println!("Key W is pressed");
         }
         if keyboard_input.pressed(KeyCode::KeyS) {
             force -= look_vector;
         }
         if keyboard_input.pressed(KeyCode::KeyA) {
-            force -= right_vector;
+            force -= right_vector * speed;
+            println!("Key A is pressed");
+
         }
         if keyboard_input.pressed(KeyCode::KeyD) {
-            force += right_vector;
+            force += right_vector * speed;
         }
         if force != Vec3::ZERO {
-            force = force.normalize() * 0.1;
+            force = force * 0.001;
             externalforce.force = force;
         } else {
             externalforce.force = Vec3::ZERO;
@@ -242,13 +249,25 @@ fn ball_force_control(
 }
 
 #[derive(Component)]
-struct CameraTarget {
-    damping: f32,
-    target: Entity,
+struct FollowTarget {
+    strength: f32,
+    vertical_offset: f32,
 }
 
+#[derive(Component)]
+struct CameraTarget;
+
 fn camera_target_system(
-    mut query: Query<(&mut Transform, &CameraTarget), With<Camera3d>>
+    camera_query: Query<(&mut Transform, &FollowTarget), With<Camera3d>>,
+    target_query: Single<&Transform, (With<CameraTarget>, Without<Camera3d>)>,
+    time: Res<Time>
 ) {
-    
+    for (mut transform, follow_target) in camera_query.into_iter() {
+        let target_position = target_query.translation + Vec3::Y * follow_target.vertical_offset;
+        let current_position = transform.translation;
+        let t = 1.0 - bevy::prelude::ops::powf(2.0, -time.delta_secs() * follow_target.strength);
+        let new_position = target_position * t + (1.0 - t) * current_position;
+        *transform = Transform::from_translation(new_position).looking_at(target_query.translation, Vec3::Y);
+
+    }
 }
