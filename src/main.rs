@@ -104,6 +104,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         Transform::from_xyz(0.0, 3.0, 5.0).with_scale(Vec3::splat(0.2)),
         RigidBody::Dynamic,
         Collider::ball(1.0),
+        Velocity::zero(),
         ExternalForce::default(),
     ));
 
@@ -212,27 +213,30 @@ pub fn mesh_to_trimesh_collider(mesh: &Mesh) -> Option<Collider> {
 
 fn ball_force_control(
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut query: Query<&mut ExternalForce, With<SceneRoot>>,
-    camera_query: Single<&Transform, With<Camera3d>>,
+    mut query: Query<(&mut ExternalForce, &Velocity), With<SceneRoot>>
 ) {
-    let transform = camera_query;
-    for mut externalforce in query.iter_mut() {
+    for (mut externalforce, velocity) in query.iter_mut() {
+        let look_vector = velocity.linvel.normalize();
+        let up_vector = Vec3::new(0.0, 1.0, 0.0);
+        let right_vector = look_vector.cross(up_vector).normalize();
         let mut force = Vec3::ZERO;
         if keyboard_input.pressed(KeyCode::KeyW) {
-            force += *transform.forward();
+            force += look_vector;
         }
         if keyboard_input.pressed(KeyCode::KeyS) {
-            force -= *transform.forward();
+            force -= look_vector;
         }
         if keyboard_input.pressed(KeyCode::KeyA) {
-            force -= *transform.right();
+            force -= right_vector;
         }
         if keyboard_input.pressed(KeyCode::KeyD) {
-            force += *transform.right();
+            force += right_vector;
         }
         if force != Vec3::ZERO {
             force = force.normalize() * 0.1;
             externalforce.force = force;
+        } else {
+            externalforce.force = Vec3::ZERO;
         }
     }
 }
