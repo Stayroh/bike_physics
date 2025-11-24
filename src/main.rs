@@ -3,6 +3,7 @@ mod camera_controller;
 
 mod autofocus;
 
+
 use avian3d::prelude::*;
 use bevy::{
     anti_alias::taa::TemporalAntiAliasing,
@@ -30,11 +31,11 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .add_plugins(WorldInspectorPlugin::new())
         .add_plugins(PhysicsPlugins::default())
-        .add_plugins(PhysicsDebugPlugin)
+        //.add_plugins(PhysicsDebugPlugin)
         .insert_resource(ClearColor(Color::BLACK))
         .add_systems(Startup, setup)
         .add_systems(Update, toggle_freecam)
-        .add_systems(Update, (ball_force_control, camera_target_system))
+        .add_systems(Update, (ball_system, camera_target_system))
         .run();
 }
 
@@ -96,12 +97,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands.spawn((
         SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/Ball.glb"))),
-        Transform::from_xyz(0.0, 3.0, 5.0).with_scale(Vec3::splat(0.05)),
-        RigidBody::Dynamic,
-        Collider::sphere(1.0),
-        LinearVelocity::ZERO,
-        ConstantForce::default(),
-        CameraTarget,
+        Transform::from_xyz(0.0, 0.0, 5.0).with_scale(Vec3::splat(0.05)),
         
     ));
 
@@ -124,8 +120,23 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands.spawn((
         SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/TronBike.glb"))),
-        Transform::from_xyz(0.0, -1.0, 0.0),
+        Transform::from_xyz(0.0, 1.0, 5.0),
         autofocus::FocusTarget,
+        RigidBody::Dynamic,
+        //Collider::sphere(1.0),
+        LinearVelocity::ZERO,
+        ConstantForce::default(),
+        CameraTarget,
+        Collider::sphere(0.05),
+        Restitution {
+            coefficient: 0.2,
+            combine_rule: CoefficientCombine::Multiply,
+        },
+        Ball {
+            radius: 0.1,
+            stiffness: 0.3,
+            damping: 0.005,
+        },
     ));
 }
 
@@ -161,37 +172,70 @@ fn add_collider_on_scene_ready(
                 commands.entity(descendant).insert(collider);
                 commands.entity(descendant).insert(RigidBody::Static);
                 commands.entity(descendant).insert(CollisionMargin(0.001));
+                commands.entity(descendant).insert(Restitution {
+                    coefficient: 1.0,
+                    combine_rule: CoefficientCombine::Multiply,
+                });
             }
         }
     }
 }
 
-fn ball_force_control(
+fn ball_system(
+    spatial_query: SpatialQuery,
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut query: Query<(&mut ConstantForce, &LinearVelocity), With<SceneRoot>>,
+    mut query: Query<(&mut Transform, &mut ConstantForce, &LinearVelocity, &Ball, &mut AngularVelocity), With<SceneRoot>>,
 ) {
-    for (mut constant_force, velocity) in query.iter_mut() {
-        let look_vector = velocity.0.normalize();
-        let speed = velocity.0.length() * 1.0;
-        let up_vector = Vec3::new(0.0, 1.0, 0.0);
-        let right_vector = look_vector.cross(up_vector).normalize();
-        let mut force = Vec3::ZERO;
-        if keyboard_input.pressed(KeyCode::KeyW) {
-            force += look_vector;
-            println!("Key W is pressed");
+    for (mut transform, mut constant_force, velocity, ball, mut angular_velocity) in query.iter_mut() {
+        // Input handling
+        
+        let (input_force, look_vector) = {
+            let look_vector = velocity.0.normalize();
+            let speed = velocity.0.length() * 1.0;
+            let up_vector = Vec3::new(0.0, 1.0, 0.0);
+            let right_vector = look_vector.cross(up_vector).normalize();
+            let mut force = Vec3::ZERO;
+            if keyboard_input.pressed(KeyCode::KeyW) {
+                force += look_vector;
+                println!("Key W is pressed");
+            }
+            if keyboard_input.pressed(KeyCode::KeyS) {
+                force -= look_vector;
+            }
+            if keyboard_input.pressed(KeyCode::KeyA) {
+                force -= right_vector * speed;
+                println!("Key A is pressed");
+            }
+            if keyboard_input.pressed(KeyCode::KeyD) {
+                force += right_vector * speed;
+            }
+            (force * 0.001, look_vector)
+        };
+        
+        let mut total_force = input_force;
+        // Spring force towards ground
+
+        let origin = transform.translation;
+        let maybe_result = spatial_query.project_point(origin, false, &SpatialQueryFilter::default());
+        if let Some(result) = maybe_result {
+            let delta = result.point - origin;
+            let distance = delta.length();
+            println!("Distance to ground: {}", distance);
+            let compression = (ball.radius - distance).max(0.0);
+            let spring_force = ball.stiffness * compression;
+
+            total_force += -delta.normalize() * spring_force;
         }
-        if keyboard_input.pressed(KeyCode::KeyS) {
-            force -= look_vector;
-        }
-        if keyboard_input.pressed(KeyCode::KeyA) {
-            force -= right_vector * speed;
-            println!("Key A is pressed");
-        }
-        if keyboard_input.pressed(KeyCode::KeyD) {
-            force += right_vector * speed;
-        }
-        force = force * 0.001;
-        constant_force.0 = force;
+
+        let damp_force = {
+            let vertical_velocity = velocity.0.dot(Vec3::Y);
+            -ball.damping * vertical_velocity
+        };
+        total_force += Vec3::Y * damp_force;
+        println!("Total force applied to ball: {:?}", total_force);
+        constant_force.0 = total_force;
+        angular_velocity.0 = Vec3::ZERO;
+        transform.look_to(look_vector, Vec3::Y);
     }
 }
 
@@ -217,4 +261,11 @@ fn camera_target_system(
         *transform =
             Transform::from_translation(new_position).looking_at(target_query.translation, Vec3::Y);
     }
+}
+
+#[derive(Component)]
+struct Ball {
+    radius: f32,
+    stiffness: f32,
+    damping: f32,
 }
